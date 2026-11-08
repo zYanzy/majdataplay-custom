@@ -4,19 +4,22 @@ using System.Linq;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
-// MajdataPlay 2.0.3 assembly patcher.
+// MajdataPlay 2.0.3 -- sensor highlight color IL patcher.
 //
 //   patcher <input.dll> --inspect
-//       -> prints JSON: {"hasFault":bool,"r":..,"g":..,"b":..,"a":..}
+//       -> prints JSON: {"r":..,"g":..,"b":..,"a":..}
 //
 //   patcher <input.dll> <output.dll> --color R,G,B,A
-//       -> writes a patched assembly (Fault counter + sensor highlight color).
-//          Components are floats in 0..1. Omitting --color uses (1,0,0,0.3).
+//       -> rewrites ONLY the active-state Color(...) in
+//          DummyTouchPanelRenderer.OnPreUpdate(). Components are 0..1;
+//          omitting --color uses (1,0,0,0.3).
 //
-// The patcher is idempotent: if the input already contains the Fault counter,
-// steps 1-6 are skipped and only the sensor color is rewritten. That makes it
-// safe to run against both the pristine DLL and an already-patched one, and
-// lets the GUI tool restore the whole mod after an official hub update.
+// This engine touches ONLY DummyTouchPanelRenderer. It never reads or writes
+// BGInfoOption / ObjectCounter, so it is completely independent from the
+// Fault counter patch: either one can be installed alone, or both in any
+// order. It is idempotent: running it again on an already-colored DLL just
+// writes the new color.
+
 internal static class Program
 {
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
@@ -112,22 +115,19 @@ internal static class Program
         });
         var module = asm.MainModule;
 
-        var enumType = module.GetType("MajdataPlay.Settings.BGInfoOption")
-                       ?? throw new Exception("BGInfoOption type not found");
-        var counter = module.GetType("MajdataPlay.Scenes.Game.ObjectCounter")
-                      ?? throw new Exception("ObjectCounter type not found");
         var renderer = module.GetType("MajdataPlay.DummyTouchPanelRenderer")
-                       ?? throw new Exception("DummyTouchPanelRenderer type not found");
-        var onPreUpdate = renderer.Methods.First(m => m.Name == "OnPreUpdate");
+                       ?? throw new Exception("DummyTouchPanelRenderer type not found (unsupported game version?)");
+        var onPreUpdate = renderer.Methods.FirstOrDefault(m => m.Name == "OnPreUpdate")
+                          ?? throw new Exception("OnPreUpdate not found (unsupported game version?)");
 
+        // --inspect doubles as the compatibility check: it must be able to
+        // locate the exact color IL before anything is written.
         var comps = LocateColorComponents(onPreUpdate);
-        bool hasFault = enumType.Fields.Any(f => f.Name == "Fault");
 
         if (inspect)
         {
             Console.WriteLine(
-                "{\"hasFault\":" + (hasFault ? "true" : "false") +
-                ",\"r\":" + F(comps[0]) +
+                "{\"r\":" + F(comps[0]) +
                 ",\"g\":" + F(comps[1]) +
                 ",\"b\":" + F(comps[2]) +
                 ",\"a\":" + F(comps[3]) + "}");
@@ -137,137 +137,6 @@ internal static class Program
         if (output is null) { Usage(); return 2; }
         var color = colorText is null ? (1f, 0f, 0f, 0.3f) : ParseColor(colorText);
 
-        if (!hasFault)
-        {
-            // ---- 1. BGInfoOption.Fault = 16 (after None = 15) ----
-            var faultEnumField = new FieldDefinition(
-                "Fault",
-                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal | FieldAttributes.HasDefault,
-                enumType) { Constant = 16 };
-            enumType.Fields.Add(faultEnumField);
-
-            // ---- 2. ObjectCounter._fault ----
-            var faultField = new FieldDefinition("_fault", FieldAttributes.Private, module.TypeSystem.Int64);
-            counter.Fields.Add(faultField);
-
-            MethodDefinition Find(string name, int paramCount) =>
-                counter.Methods.First(m => m.Name == name && m.Parameters.Count == paramCount);
-
-            var clear = Find("Clear", 0);
-            var updateComboCount = Find("UpdateComboCount", 2);
-            var updateOutput = Find("UpdateInfoDisplayerOutput", 6);
-            var initText = Find("SetInfoDisplayerInitText", 4);
-            var setActive = counter.Methods.First(m => m.Name == "SetInfoDisplayerActive");
-
-            // Reuse an existing callvirt to TMP_Text::set_text(string) so the
-            // reference keeps its original scope (Unity.TextMeshPro).
-            MethodReference? setText = counter.Methods
-                .Where(m => m.HasBody)
-                .SelectMany(m => m.Body.Instructions)
-                .Where(i => i.OpCode == OpCodes.Callvirt)
-                .Select(i => i.Operand as MethodReference)
-                .FirstOrDefault(mr => mr is not null && mr.Name == "set_text" && mr.Parameters.Count == 1);
-            if (setText is null) throw new Exception("TMP_Text::set_text reference not found");
-
-            // Core-library references must use the target module's mscorlib scope.
-            var corelib = module.AssemblyReferences.First(r => r.Name == "mscorlib");
-            var objectRef = new TypeReference("System", "Object", module, corelib);
-            var int64Ref = new TypeReference("System", "Int64", module, corelib);
-            var objectToString = new MethodReference("ToString", module.TypeSystem.String, objectRef) { HasThis = true };
-
-            // ---- 3. Clear(): _fault = 0 ----
-            {
-                var il = clear.Body.GetILProcessor();
-                var first = clear.Body.Instructions[0];
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_0));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldc_I4_0));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Conv_I8));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Stfld, faultField));
-            }
-
-            // ---- 4. UpdateComboCount(): decrement on Miss / Good / Great, skip Perfect + TooFast ----
-            // JudgeGrade: Miss=0, LateGood=1, LateGreat*=2..4, Perfect*=5..9,
-            //             FastGreat*=10..12, FastGood=13, TooFast=14
-            {
-                var il = updateComboCount.Body.GetILProcessor();
-                var first = updateComboCount.Body.Instructions[0];
-                var grade = updateComboCount.Parameters[0];
-                var dec = Instruction.Create(OpCodes.Ldarg_0);
-
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, grade));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldc_I4, 5));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Blt, dec));       // 0..4 -> decrement
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, grade));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldc_I4, 10));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Blt, first));     // 5..9 -> skip
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, grade));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldc_I4, 14));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Bge, first));     // >=14 -> skip
-                il.InsertBefore(first, dec);                                       // 10..13 -> decrement
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_0));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldfld, faultField));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldc_I4_1));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Conv_I8));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Sub));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Stfld, faultField));
-            }
-
-            // ---- 5. UpdateInfoDisplayerOutput(): render the Fault value ----
-            {
-                var il = updateOutput.Body.GetILProcessor();
-                var first = updateOutput.Body.Instructions[0];
-                var option = updateOutput.Parameters[5];
-                var text = updateOutput.Parameters[0];
-                var textObject = updateOutput.Parameters[1];
-                var headerObject = updateOutput.Parameters[3];
-
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, option));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldind_I4));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldc_I4, 16));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Bne_Un, first));
-
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_0));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, textObject));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, headerObject));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldc_I4_1));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Call, setActive));
-
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, text));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_0));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldfld, faultField));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Box, int64Ref));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Callvirt, objectToString));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Callvirt, setText));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ret));
-            }
-
-            // ---- 6. SetInfoDisplayerInitText(): header "Fault" ----
-            {
-                var il = initText.Body.GetILProcessor();
-                var first = initText.Body.Instructions[0];
-                var option = initText.Parameters[3];
-                var header = initText.Parameters[1];
-                var ret = Instruction.Create(OpCodes.Ret);
-
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, option));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldind_I4));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldc_I4, 16));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Bne_Un, first));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, header));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Brfalse, ret));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldarg_S, header));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Ldstr, "Fault"));
-                il.InsertBefore(first, Instruction.Create(OpCodes.Callvirt, setText));
-                il.InsertBefore(first, ret);
-            }
-
-            clear.Body.MaxStackSize = Math.Max(clear.Body.MaxStackSize, 4);
-            updateComboCount.Body.MaxStackSize = Math.Max(updateComboCount.Body.MaxStackSize, 4);
-            updateOutput.Body.MaxStackSize = Math.Max(updateOutput.Body.MaxStackSize, 8);
-            initText.Body.MaxStackSize = Math.Max(initText.Body.MaxStackSize, 4);
-        }
-
-        // ---- 7. DummyTouchPanelRenderer.OnPreUpdate(): active sensor highlight ----
         // Mutate Operand in place: the R instruction is a brtrue.s target.
         comps[0].Operand = color.Item1;
         comps[1].Operand = color.Item2;
@@ -276,8 +145,7 @@ internal static class Program
 
         asm.Write(output, new WriterParameters { WriteSymbols = false });
         Console.WriteLine(
-            "OK hasFault=" + (hasFault ? "existing" : "injected") +
-            " color=" + color.Item1.ToString("R", Inv) + "," +
+            "OK color=" + color.Item1.ToString("R", Inv) + "," +
             color.Item2.ToString("R", Inv) + "," +
             color.Item3.ToString("R", Inv) + "," +
             color.Item4.ToString("R", Inv));

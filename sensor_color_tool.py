@@ -4,7 +4,10 @@ MajdataPlay 传感器高亮配色工具
 
 直接修改运行包 Assembly-CSharp.dll 中 DummyTouchPanelRenderer.OnPreUpdate()
 激活态的 Color(R,G,B,A)。补丁引擎为 Mono.Cecil，支持幂等重打：
-输入可以是官方原版 DLL，也可以是已打过补丁的 DLL。
+输入可以是官方原版 DLL，也可以是已改过颜色的 DLL。
+
+引擎只改写这 4 个浮点常量，不注入也不移除任何其他补丁
+（例如独立的 Fault 计数器补丁），两者可任意顺序叠加。
 
 依赖：Python 3 (tkinter，标准库) + dotnet 运行时 + engine/patcher.dll
 """
@@ -24,7 +27,10 @@ from tkinter import colorchooser, filedialog, messagebox, scrolledtext, ttk
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(TOOL_DIR)
 DEFAULT_GAME_DIR = os.path.join(BASE_DIR, "MajdataPlay_Build-LATEST")
-BACKUP_DIR = os.path.join(BASE_DIR, "fault_patch_backup")
+BACKUP_DIR = os.path.join(BASE_DIR, "original_backup")
+LEGACY_BACKUP_DIR = os.path.join(BASE_DIR, "fault_patch_backup")
+if not os.path.isdir(BACKUP_DIR) and os.path.isdir(LEGACY_BACKUP_DIR):
+    BACKUP_DIR = LEGACY_BACKUP_DIR  # keep older installs working
 OFFICIAL_DLL = os.path.join(BACKUP_DIR, "Assembly-CSharp.dll")
 ENGINE_DIR = os.path.join(TOOL_DIR, "engine")
 ENGINE_DLL = os.path.join(ENGINE_DIR, "patcher.dll")
@@ -497,9 +503,9 @@ class App:
                 return
             st = self.inspect(dll)
             self.current_state = st
-            txt = "当前 DLL：RGBA(%.2f, %.2f, %.2f, %.2f) · %s" % (
+            txt = "当前 DLL：RGBA(%.2f, %.2f, %.2f, %.2f)%s" % (
                 st["r"], st["g"], st["b"], st["a"],
-                "Fault 计数器完整" if st["hasFault"] else "未打补丁（应用时会自动恢复）")
+                " · 原版默认灰" if (st["r"], st["g"], st["b"], round(st["a"], 2)) == (0.0, 0.0, 0.0, 0.3) else "")
             self.state_label.configure(text=txt, foreground=SUB)
             self.log("读取程序集：%s" % txt)
             self.set_color((st["r"], st["g"], st["b"], st["a"]), silent=True)
@@ -539,8 +545,6 @@ class App:
         got = [st["r"], st["g"], st["b"], st["a"]]
         if any(abs(a - b) > 0.002 for a, b in zip(want, got)):
             raise RuntimeError("生成的程序集颜色校验失败：期望 %s 实际 %s" % (want, got))
-        if not st["hasFault"]:
-            raise RuntimeError("生成的程序集缺少 Fault 计数器补丁")
         return st
 
     def backup_current(self):
@@ -585,12 +589,12 @@ class App:
             self.backup_current()
             shutil.copy2(tmp, self.target_dll())
             check = self.inspect(self.target_dll())
-            self.log("替换完成，运行包当前：RGBA(%.2f, %.2f, %.2f, %.2f) · Fault=%s" % (
-                check["r"], check["g"], check["b"], check["a"], check["hasFault"]))
+            self.log("替换完成，运行包当前：RGBA(%.2f, %.2f, %.2f, %.2f)" % (
+                check["r"], check["g"], check["b"], check["a"]))
             os.remove(tmp)
             self.current_state = check
             self.state_label.configure(
-                text="当前 DLL：RGBA(%.2f, %.2f, %.2f, %.2f) · Fault 计数器完整" %
+                text="当前 DLL：RGBA(%.2f, %.2f, %.2f, %.2f)" %
                      (check["r"], check["g"], check["b"], check["a"]), foreground=SUB)
             if self.auto_start.get():
                 self.start_game()
@@ -628,7 +632,8 @@ class App:
             return
         if not messagebox.askyesno(
                 "确认回滚",
-                "将用官方原版 2.0.3 程序集覆盖运行包，Fault 计数器和自定义高亮色都会丢失。\n\n"
+                "将用你自备的官方原版 2.0.3 程序集覆盖运行包，所有 IL 补丁"
+                "（自定义高亮色，以及可能已单独安装的其他补丁）都会丢失。\n\n"
                 "个人数据不会改动，且当前程序集会先备份。继续吗？"):
             return
         running = self.game_running()
