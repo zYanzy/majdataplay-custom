@@ -22,6 +22,7 @@
 | `restore.py` | 回滚示例脚本（需自备官方原版备份文件） |
 | `dev-source-changes/` | 按 2.1.0 dev 分支结构修改的 10 个源码文件 |
 | `LICENSE` | GPLv3 全文，来自官方仓库 |
+| `INSTALL.md` | 在另一台同版本客户端上部署的完整指南（供 AI Agent 阅读执行） |
 
 ## 环境与首次构建
 
