@@ -18,7 +18,7 @@
 | **不需要** | Unity Editor、游戏源码工程、编译游戏 `.sln`、重打包 |
 | 能做 | 托管 C# 逻辑：判定、计数、显示文本、颜色常量、条件分支、枚举值、字段 |
 | 做不了 | prefab / 场景 / Shader / 贴图 / UI 层级 / 打包语言包 / 新增 MonoBehaviour 或资源类型 |
-| 现有两个功能 | Fault 计数器、传感器高亮配色；**两个独立引擎，可只装一个、任意顺序叠加** |
+| 现有三个功能 | Fault 计数器、倒计时显示项、传感器高亮配色；**三个独立引擎，可只装一个、任意顺序叠加** |
 
 **一句话方法论**：只要「改动落在托管 C# 逻辑里」且「后端是 Mono」，单凭一个运行包就足以开发，不需要源码工程。
 
@@ -39,7 +39,7 @@
 
 | 仓库 | 内容 | 用途 |
 | --- | --- | --- |
-| [zYanzy/majdataplay-fault-counter](https://github.com/zYanzy/majdataplay-fault-counter) | 独立 Fault 补丁引擎、`apply_fault.py`、一键 bat、dev 源码改动、INSTALL.md | **多段注入的代码范本** |
+| [zYanzy/majdataplay-fault-counter](https://github.com/zYanzy/majdataplay-fault-counter) | **两个独立引擎**：Fault（`engine-src/` + `apply_fault.py` + `INSTALL.md`）与倒计时（`countdown-src/` + `apply_countdown.py` + `INSTALL-COUNTDOWN.md`）；另有 dev 源码改动 | **多段注入 + 同类型信息项叠加的代码范本** |
 | [zYanzy/majdataplay-sensor-color](https://github.com/zYanzy/majdataplay-sensor-color) | 独立配色引擎、tkinter GUI、INSTALL.md | **原地改常量 + 语义锚点的代码范本** |
 | [zYanzy/majdataplay-custom](https://github.com/zYanzy/majdataplay-custom) | 归档导航页 + **本文件** + 拆分前的历史快照 | **项目入口 / 上下文来源** |
 
@@ -99,6 +99,7 @@ ilspycmd -t MajdataPlay.ObjectCounter "<GAME_DIR>\MajdataPlay_Data\Managed\Assem
 | 文件 | 什么时候读它 |
 | --- | --- |
 | `majdataplay-fault-counter/engine-src/Program.cs` | 需要**加枚举值、加字段、改方法体 IL、拦截方法开头、做幂等检测**时。它示范了 6 段注入与「已安装则跳过」 |
+| `majdataplay-fault-counter/countdown-src/Program.cs` | 需要**新增同类型信息显示项、复用现有对象字段、在 IL 里调用 BCL 方法（`TimeSpan` / `Math`）拼字符串**时。它示范了「不新增字段、只插前置块」以及**多个前置块链式叠加**（见 §6.15） |
 | `majdataplay-sensor-color/engine-src/Program.cs` | 需要**原地改常量、用语义锚点定位指令**时。它示范了 `brtrue` 跳转目标 → 4×`ldc.r4` → `Color::.ctor` 的完整定位与校验 |
 | `*/engine-src/patcher.csproj` | 直接复制，不要改 `TargetFramework`；只替换 `Mono.Cecil` 之外的东西 |
 | `majdataplay-fault-counter/apply_fault.py` | **安全应用脚本的标准范本**：`inspect 源 → 备份 → 生成 → staged inspect → 替换单文件 → final inspect`，任一步失败不写运行包，且检测游戏进程 |
@@ -114,7 +115,7 @@ dotnet "<TOOL_DIR>\engine\patcher.dll" "<INPUT.dll>" --inspect
 dotnet "<TOOL_DIR>\engine\patcher.dll" "<INPUT.dll>" "<OUTPUT.dll>" [功能参数]
 ```
 
-- `--inspect` 输出**一行 JSON**，且只含自己功能的状态字段。现有两份格式不同：Fault 是 `{"hasFault":true|false}`，配色是 `{"r":..,"g":..,"b":..,"a":..}`。旧合集版同时输出两组字段的格式**已废弃**，不要复用。
+- `--inspect` 输出**一行 JSON**，且只含自己功能的状态字段。现有三份格式各不相同：Fault 是 `{"hasFault":true|false}`，倒计时是 `{"hasCountdown":true|false}`，配色是 `{"r":..,"g":..,"b":..,"a":..}`。旧合集版同时输出多组字段的格式**已废弃**，不要复用。
 - `--inspect` 同时也是**版本兼容校验**：锚点找不到就抛异常、返回非 0。绝不能让它「容错继续」。
 
 ---
@@ -218,7 +219,8 @@ inspect 源 → 确认 MajdataPlay.exe 已退出并备份当前 DLL
 11. **GUI 必须用 bat 启动**：WorkBuddy 内置便携 Python（PATH 首位）没有 tkinter；bat 会探测带 tkinter 的解释器并以 `pyw` 启动。升级代码后**旧工具窗口必须关掉重开**，否则内存里是旧代码，解析新 JSON 会 `KeyError`。
 12. **公开仓库脱敏 + 许可**：官方源码 GPLv3，公开仓库须保留 `LICENSE`；对官方源码的修改同样按 GPLv3 提供。第三方 `Mono.Cecil` 为 MIT。不得包含个人路径、账号、邮箱。
 13. **本机网络限制**：本机 `github.com` 主站被本地代理拒绝（502），`git push` **不可用**；`api.github.com` 可用。同步仓库请用 `sync_to_github.py`（走 REST API 写 Git 对象，自动跳过无变更、支持 `--repo NAME`），不要直接 push。对方的机器未必有此限制。
-14. **dev 源码不是必需品**：「没有 `MajdataPlay-dev` 就没法开发」是误解。两个现有功能都只凭运行包完成。
+14. **dev 源码不是必需品**：「没有 `MajdataPlay-dev` 就没法开发」是误解。三个现有功能都只凭运行包完成。
+15. **多个功能同时拦截同一个方法时，前置块必须链式跳转**：若新引擎在 `UpdateInfoDisplayerOutput` / `SetInfoDisplayerInitText` 开头插入「判断 option → 不匹配就跳走」的前置块，跳转目标必须是**插入前 `body.Instructions[0]`**（即当前第一条指令），而不是硬记「原方法第一条」。这样后装的块会跳到先装的块，自动形成 `新块 → 旧块 → 原方法` 的链；若写死原方法第一条，后装的块会把先装的块整个跳过，两个功能只剩一个生效。三个引擎已按此写法验证过**双向叠加**（先 A 后 B、先 B 后 A）均正常。新增同类功能时照抄 `countdown-src/Program.cs` 的写法，并用反编译确认顺序。
 
 ---
 
