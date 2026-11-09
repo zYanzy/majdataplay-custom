@@ -33,13 +33,13 @@
 | `MajdataPlay_Build-LATEST/` | 已编译 Windows 运行包（约 5.9 GB），Mono 后端，含用户的 `MaiCharts/`、`Skins/`、`MajScores.db`、`settings.json`、`Logs/` | **真正的目标**。所有补丁只写它的 `Managed\Assembly-CSharp.dll` |
 | `MajdataPlay-dev/` | 官方 dev 分支源码 zip（Unity 6000.3.17f1，bundleVersion 2.1.0，约 949 MB） | **仅作参考**。无 `.git`、无 `Library/`、5 个 submodule 全空；本机 Unity 版本不匹配，打不开也编译不了。其结构（语言包 `Translations` 字典、设置枚举）与 2.0.3 运行包**不同** |
 
-> 曾经按 2.1.0 结构改过 10 个 dev 源码文件，保存在 `majdataplay-fault-counter` 仓库的 `dev-source-changes/`。**那是「未来完整 Build」路线的参考实现，绝不能用它编译出的 DLL 覆盖 2.0.3 运行包。**
+> 曾经按 2.1.0 结构改过 10 个 dev 源码文件，保存在 `majdataplay-center-display` 仓库的 `dev-source-changes/`。**那是「未来完整 Build」路线的参考实现，绝不能用它编译出的 DLL 覆盖 2.0.3 运行包。**
 
 ### 1.2 三个公开仓库
 
 | 仓库 | 内容 | 用途 |
 | --- | --- | --- |
-| [zYanzy/majdataplay-fault-counter](https://github.com/zYanzy/majdataplay-fault-counter) | **两个独立引擎**：Fault（`engine-src/` + `apply_fault.py` + `INSTALL.md`）与倒计时（`countdown-src/` + `apply_countdown.py` + `INSTALL-COUNTDOWN.md`）；另有 dev 源码改动 | **多段注入 + 同类型信息项叠加的代码范本** |
+| [zYanzy/majdataplay-center-display](https://github.com/zYanzy/majdataplay-center-display) | **两个独立引擎**：Fault（`engine-src/` + `apply_fault.py` + `INSTALL.md`）与倒计时（`countdown-src/` + `apply_countdown.py` + `INSTALL-COUNTDOWN.md`）；另有 dev 源码改动 | **多段注入 + 同类型信息项叠加的代码范本** |
 | [zYanzy/majdataplay-sensor-color](https://github.com/zYanzy/majdataplay-sensor-color) | 独立配色引擎、tkinter GUI、INSTALL.md | **原地改常量 + 语义锚点的代码范本** |
 | [zYanzy/majdataplay-custom](https://github.com/zYanzy/majdataplay-custom) | 归档导航页 + **本文件** + 拆分前的历史快照 | **项目入口 / 上下文来源** |
 
@@ -98,11 +98,11 @@ ilspycmd -t MajdataPlay.ObjectCounter "<GAME_DIR>\MajdataPlay_Data\Managed\Assem
 
 | 文件 | 什么时候读它 |
 | --- | --- |
-| `majdataplay-fault-counter/engine-src/Program.cs` | 需要**加枚举值、加字段、改方法体 IL、拦截方法开头、做幂等检测**时。它示范了 6 段注入与「已安装则跳过」 |
-| `majdataplay-fault-counter/countdown-src/Program.cs` | 需要**新增同类型信息显示项、复用现有对象字段、在 IL 里调用 BCL 方法（`TimeSpan` / `Math`）拼字符串**时。它示范了「不新增字段、只插前置块」以及**多个前置块链式叠加**（见 §6.15） |
+| `majdataplay-center-display/engine-src/Program.cs` | 需要**加枚举值、加字段、改方法体 IL、拦截方法开头、做幂等检测**时。它示范了 6 段注入与「已安装则跳过」 |
+| `majdataplay-center-display/countdown-src/Program.cs` | 需要**新增同类型信息显示项、复用现有对象字段、在 IL 里调用 BCL 方法（`TimeSpan` / `Math`）拼字符串**时。它示范了「不新增字段、只插前置块」以及**多个前置块链式叠加**（见 §6.15） |
 | `majdataplay-sensor-color/engine-src/Program.cs` | 需要**原地改常量、用语义锚点定位指令**时。它示范了 `brtrue` 跳转目标 → 4×`ldc.r4` → `Color::.ctor` 的完整定位与校验 |
 | `*/engine-src/patcher.csproj` | 直接复制，不要改 `TargetFramework`；只替换 `Mono.Cecil` 之外的东西 |
-| `majdataplay-fault-counter/apply_fault.py` | **安全应用脚本的标准范本**：`inspect 源 → 备份 → 生成 → staged inspect → 替换单文件 → final inspect`，任一步失败不写运行包，且检测游戏进程 |
+| `majdataplay-center-display/apply_fault.py` | **安全应用脚本的标准范本**：`inspect 源 → 备份 → 生成 → staged inspect → 替换单文件 → final inspect`，任一步失败不写运行包，且检测游戏进程 |
 | `*/restore.py` | 只回滚单个 DLL 的通用脚本 |
 | `*/INSTALL.md` | 新功能做成可分发仓库时，照这个格式写部署指南（版本指纹、兼容性校验、备份、验收、回滚、禁止事项） |
 | `majdataplay-sensor-color/sensor_color_tool.py` | 新功能若需要 GUI（预设色板、滑块、预览、一键应用、自动备份） |

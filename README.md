@@ -6,10 +6,12 @@
 
 | 想要的功能 | 仓库 | 说明 |
 | --- | --- | --- |
-| **Fault 计数器** | [zYanzy/majdataplay-fault-counter](https://github.com/zYanzy/majdataplay-fault-counter) | 新增信息显示项 `Fault`，Miss / Good / Great 时 -1；命令行一键应用 + 完整校验 |
+| **中心显示扩展（Fault + 倒计时）** | [zYanzy/majdataplay-center-display](https://github.com/zYanzy/majdataplay-center-display) | 给 HUD 中心信息显示位追加自定义显示项：`Fault`（Miss / Good / Great 时 -1）与 `Countdown`（剩余时间 `M:SS`），两个独立引擎各自一键应用 |
 | **传感器高亮配色** | [zYanzy/majdataplay-sensor-color](https://github.com/zYanzy/majdataplay-sensor-color) | tkinter GUI 把「调试 → 显示传感器」的灰色高亮改成任意 RGBA |
 
 两份补丁针对同一个游戏版本：**MajdataPlay Windows 运行包 2.0.3 `20260917-637bba0`（Mono 后端）**。它们分别只改 `BGInfoOption`/`ObjectCounter` 与 `DummyTouchPanelRenderer`，**互不依赖、互不覆盖**，可以只装一个，也可以按任意顺序两个都装。
+
+> `majdataplay-center-display` 曾用名 `majdataplay-fault-counter`（只含第一个显示项时的命名），现已按「中心显示项扩展」主题重写文档；GitHub 会自动把旧链接重定向到新仓库。
 
 ## 为什么要拆
 
@@ -40,7 +42,7 @@
 
 这些文件**不再接收更新，也不建议用于新部署**。新部署请一律使用上面两个新仓库；两者都含完整的 `INSTALL.md`，可直接交给 AI Agent 执行。
 
-> 本机仍在使用的 GUI 已升级为「只改颜色」的独立引擎：它不会注入也不会移除 Fault 计数器。因此若游戏更新程序被官方覆盖，需要**分别**重新应用两个补丁：先跑 `majdataplay-fault-counter` 的 `apply_fault.py`，再打开配色工具点「应用到游戏」。
+> 本机仍在使用的 GUI 已升级为「只改颜色」的独立引擎：它不会注入也不会移除 Fault 计数器。因此若游戏更新程序被官方覆盖，需要**分别**重新应用两个补丁：先跑 `majdataplay-center-display` 的 `apply_fault.py`，再打开配色工具点「应用到游戏」。
 
 ## 许可与声明
 

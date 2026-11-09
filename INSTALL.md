@@ -6,7 +6,7 @@
 
 | 目标 | 仓库 | 直链 |
 | --- | --- | --- |
-| 只装 **Fault 计数器** | `majdataplay-fault-counter` | https://github.com/zYanzy/majdataplay-fault-counter/blob/main/INSTALL.md |
+| 只装 **Fault 计数器** | `majdataplay-center-display` | https://github.com/zYanzy/majdataplay-center-display/blob/main/INSTALL.md |
 | 只装 **传感器配色工具** | `majdataplay-sensor-color` | https://github.com/zYanzy/majdataplay-sensor-color/blob/main/INSTALL.md |
 | 两个都要 | 按任意顺序分别执行上面两份指南 | — |
 
